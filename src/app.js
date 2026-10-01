@@ -44,7 +44,7 @@ function articlePayload(req, image) {
     author: req.body.author, image, tags: String(req.body.tags || '').split(',').map(v => v.trim()).filter(Boolean),
     postType: req.body.postType, status: req.body.intent === 'publish' ? 'published' : 'draft', actor: req.user.email };
 }
-function articleForm(article = {}, error = '') {
+function articleForm(article = {}, error = '', canPublish = true) {
   const isNew = !article.id;
   const tags = Array.isArray(article.tags) ? article.tags.join(', ') : '';
   const safeBody = sanitizeHtml(article.body || '', { allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img','figure','figcaption']), allowedAttributes: { a: ['href','title'], img: ['src','alt'] } });
@@ -59,7 +59,7 @@ function articleForm(article = {}, error = '') {
     <label>Story</label><div class="toolbar"><button type="button" onclick="document.execCommand('bold')"><b>Bold</b></button><button type="button" onclick="document.execCommand('italic')"><i>Italic</i></button><button type="button" onclick="document.execCommand('formatBlock',false,'h2')">Heading</button><button type="button" onclick="document.execCommand('insertUnorderedList')">List</button><button type="button" onclick="let u=prompt('Link URL');if(u)document.execCommand('createLink',false,u)">Link</button></div>
     <div class="editor" id="editor" contenteditable="true">${safeBody}</div><input type="hidden" name="body" id="body">
     <p class="row"><button name="intent" value="draft">Save draft</button>
-    <button name="intent" value="publish">Publish</button></p>
+    ${canPublish ? '<button name="intent" value="publish">Publish</button>' : ''}</p>
     </form>${!isNew ? `<p><a href="/articles/${Number(article.id)}/preview">Preview saved version</a></p>` : ''}`;
 }
 
@@ -101,16 +101,17 @@ app.post('/account', requireLogin, (req, res) => {
 app.get('/', requireLogin, async (req, res) => {
   try {
     const { articles } = await request('GET', 'articles');
-    const rows = articles.map(a => `<tr><td><a href="/articles/${a.id}">${e(a.title)}</a><br><small>${e(a.slug)}</small></td><td>${e(a.status)}</td><td>${e(a.postType)}</td><td>${e(a.updatedAt ? String(a.updatedAt).slice(0,10) : '')}</td></tr>`).join('');
+    const visible = req.user.role === 'author' ? articles.filter(a => canEdit(req.user, a.id) && a.status === 'draft') : articles;
+    const rows = visible.map(a => `<tr><td><a href="/articles/${a.id}">${e(a.title)}</a><br><small>${e(a.slug)}</small></td><td>${e(a.status)}</td><td>${e(a.postType)}</td><td>${e(a.updatedAt ? String(a.updatedAt).slice(0,10) : '')}</td></tr>`).join('');
     res.send(layout('Articles', req.user, `<div class="row"><h1>Articles</h1><a class="button" href="/articles/new">New article</a></div><div class="card"><table><tr><th>Title</th><th>Status</th><th>Type</th><th>Updated</th></tr>${rows}</table></div>`, req.query.notice));
   } catch (error) { res.status(502).send(layout('Articles', req.user, '<h1>Site connection failed</h1>', error.message)); }
 });
-app.get('/articles/new', requireLogin, (req, res) => res.send(layout('New article', req.user, articleForm({ author: req.user.name || req.user.email }))));
+app.get('/articles/new', requireLogin, (req, res) => res.send(layout('New article', req.user, articleForm({ author: req.user.name || req.user.email }, '', req.user.role !== 'author'))));
 app.get('/articles/:id', requireLogin, async (req, res) => {
   try {
     const { article } = await request('GET', `articles/${Number(req.params.id)}`);
     if (!canEdit(req.user, article.id) || (req.user.role === 'author' && article.status === 'published')) return res.status(403).send('Forbidden');
-    res.send(layout('Edit article', req.user, articleForm(article, req.query.error) + (article.status === 'published' ? `<p><a href="${sitePublic}/articles/${e(article.slug)}" target="_blank" rel="noopener">View live article</a></p>` : ''), req.query.notice));
+    res.send(layout('Edit article', req.user, articleForm(article, req.query.error, req.user.role !== 'author') + (article.status === 'published' ? `<p><a href="${sitePublic}/articles/${e(article.slug)}" target="_blank" rel="noopener">View live article</a></p>` : ''), req.query.notice));
   } catch (error) { res.status(502).send(layout('Error', req.user, '<h1>Cannot open article</h1>', error.message)); }
 });
 app.get('/articles/:id/preview', requireLogin, async (req, res) => {
@@ -140,7 +141,7 @@ async function saveArticle(req, res, id) {
     if (!id) db.prepare('INSERT INTO article_owners (article_id,user_id) VALUES (?,?)').run(saved.id, req.user.id);
     res.redirect(`/articles/${saved.id}?notice=Saved`);
   } catch (error) {
-    res.status(400).send(layout('Article error', req.user, articleForm({ ...req.body, id, tags: String(req.body.tags || '').split(',') }, error.message)));
+    res.status(400).send(layout('Article error', req.user, articleForm({ ...req.body, id, tags: String(req.body.tags || '').split(',') }, error.message, req.user.role !== 'author')));
   }
 }
 app.post('/articles', requireLogin, upload.single('imageFile'), (req, res) => saveArticle(req, res, null));
