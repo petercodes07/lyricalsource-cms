@@ -28,3 +28,25 @@ The first cross-platform delivery is an HTTPS web app with an installable app ex
 - Uploads, accounts, and sessions survive application restarts and deployments.
 - The publishing token remains server-side, and the CMS is reachable only over HTTPS through the intended staff access path.
 - The full workflow passes against the deployed site API and database, not only the mock API.
+
+## Implementation update — 2026-10-01
+
+Implemented on `codex/installable-cms`: status-preserving saves, explicit
+unpublish, responsive editorial interface, manifest/icons and install guidance,
+unsaved-edit and connection notices, an isolated demo, deployment templates and
+verified SQLite backup tooling. Regression coverage uses a mock publishing API.
+
+Still pending: companion-site blog revalidation and deployment, actual HTTPS
+hosting/SMTP and persistent uploads, live database end-to-end verification,
+server restore drill and installed-app verification on physical Windows/macOS/
+Linux machines. Native installers remain outside this browser-installable build.
+
+## Desktop packaging update
+
+The delivery target now includes downloadable desktop installers. `desktop/`
+contains a sandboxed Electron client, workspace connection setup, per-workspace
+sessions, native menus, URL restrictions and retry behavior. Windows NSIS,
+macOS DMG/ZIP and Linux AppImage/DEB targets are configured. GitHub Actions can
+build each on its matching OS. No server database, server dependencies or
+publishing token is included. Signing, notarization, automatic updates, actual
+Windows/Linux execution and shared HTTPS hosting are still release work.

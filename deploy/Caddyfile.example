@@ -1,0 +1,5 @@
+# Replace with the actual staff domain; point its DNS to this host first.
+cms.example.com {
+    reverse_proxy 127.0.0.1:3100
+    header Strict-Transport-Security "max-age=31536000"
+}

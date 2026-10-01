@@ -45,3 +45,120 @@ Uploaded images are written by the site to `public/uploads/news/cms`. Ensure tha
 ## Tests
 
 `npm test` exercises login, invitations, article drafting, publishing, and role restrictions against a mock site API. Run the public site's `npx tsc --noEmit` for its TypeScript checks. A live end-to-end test requires a MySQL database with the migration applied.
+
+## Installable staff app
+
+The CMS includes a standalone web-app manifest, 192/512 px icons, an installation
+page at `/install`, a responsive workspace and an unsaved-edit warning. Staff use
+one hosted server; no API token or staff database is distributed to clients.
+Serve it over HTTPS (localhost is allowed for development). Install through a
+supporting browser's menu or the **Get the app** page. Browser installation is
+supported where available on Windows, macOS and Linux; there are no native
+installers. See [MDN installation guidance](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
+
+There is intentionally no service worker or offline content cache. Editing is
+online; the offline notice asks staff to keep the page open until connectivity
+returns. Closing the page can lose unsaved work. Browser storage does not keep
+private drafts. The UI provides a preview of the saved version. Inside a saved article, **View page on website** opens the website article layout. Drafts use a private signed link that expires after 15 minutes; reopen the editor for a fresh link. Save changes before viewing. The companion site must include the article-preview support; drafts remain excluded from public article queries.
+
+**Save changes** preserves publication. **Save draft** on an older open form
+also preserves a published article's status. **Unpublish article** is a separate
+confirmed action available only to publishing roles. Authors cannot edit
+published articles or unpublish. Concurrent editing still uses the site's
+existing last-write behavior; version conflict handling is not implemented.
+
+## Isolated preview
+
+```bash
+npm ci
+npm run demo
+```
+
+Open `http://127.0.0.1:3100`. Demo login: `demo@example.com`, password
+`local-demo-only-1234`. This starts a temporary SQLite database and a local mock
+publishing API with sample articles. It overrides live API/SMTP settings, binds
+only to loopback, and discards data on exit. Uploads are deliberately disabled in
+the demo; validate those against a nonproduction site API. Never deploy the demo
+command as a shared service.
+
+## Hosted deployment
+
+1. Deploy the companion site's CMS API after backing up its database and applying
+   `db/010_cms_publishing.sql`. Verify article updates invalidate the public blog
+   listing as well as news/article pages. This repository cannot change the site's
+   revalidation behavior. Preserve the site's uploaded-media directory across
+   releases (or use shared object storage).
+2. Install this repository and dependencies under `/opt/lyricalsource-cms` on a
+   host with a supported Node version. Create a dedicated `lyricalsource` system
+   user and `/var/lib/lyricalsource-cms`, owned by that user. Use the tested runtime
+   for rollout; this change was locally tested on Node 25.8.1.
+3. Copy `deploy/cms.env.example` to `/etc/lyricalsource-cms.env`, set the real URLs,
+   shared secret, bootstrap account and optional SMTP. Restrict file permissions
+   to the service account. Remove the bootstrap password after creating the account.
+4. Adapt `deploy/lyricalsource-cms.service` to your Node executable path. Install it
+   with systemd and enable the service. Put an HTTPS reverse proxy in front;
+   `deploy/Caddyfile.example` shows a configuration template. Keep port 3100 bound
+   to loopback; use your intended staff network/access controls at the proxy.
+5. Test invitation, login, draft, preview, upload, publish, update and unpublish
+   against the actual migrated test site. Verify public visibility and media
+   persistence across both services' restarts before production rollout.
+
+The deployment templates have not been exercised on a hosting server. They do
+not provision DNS, TLS, the companion site, or staff network access automatically.
+
+## Backups and restore
+
+Run `npm run backup -- /secure/backups/cms-YYYY-MM-DD.sqlite` as the service user,
+with the same `CMS_ENV_FILE` as the service. The destination must be new and its
+parent directory must exist. This uses SQLite's online backup API and checks the
+copy's integrity, avoiding an unsafe copy of a database with an active WAL.
+Protect backups as staff data and copy them to your approved backup storage.
+Back up website content and uploaded images separately.
+
+For a restore drill: stop the CMS, preserve its current database and any `-wal`
+and `-shm` files as a recovery set, restore the verified backup to `CMS_DB_PATH`
+with service-user ownership and restricted permissions, then restart. Do not
+leave the previous WAL/SHM files alongside a restored database. Verify login,
+article ownership, team roles and publishing API connectivity. Restoring the CMS
+SQLite file alone does not restore article content on the website.
+
+## Downloadable desktop app
+
+The `desktop/` package is an Electron client with its own window and native
+installer targets. It connects to the central CMS; it does not run Express,
+ship SQLite, or contain the publishing API token. The browser-installable option
+above remains optional; desktop staff do not need to install through a browser.
+
+```bash
+npm run desktop:setup
+npm run desktop
+```
+
+On first launch, enter your team's **HTTPS CMS root address**. The app remembers
+the address and stores its login session in the OS user profile. Use
+**Workspace → Connection settings** to change servers. The setup screen is the
+only renderer with a narrow settings bridge; remote CMS content has no Node or
+IPC access. External HTTPS links require confirmation and open in the system
+browser. Cross-origin redirects and unexpected permissions are blocked.
+
+For local development, leave `npm run demo` running in one terminal and run
+`npm run desktop:demo` in another. The HTTP loopback exception is available only
+in an unpackaged development build with `--demo`. Packaged apps require HTTPS.
+
+Build installers on the matching operating system:
+
+```bash
+npm run desktop:dist
+```
+
+Outputs are in `desktop/dist`: macOS DMG/ZIP, Windows NSIS EXE, Linux
+AppImage/DEB. The manually triggered **Desktop installers** GitHub Actions
+workflow builds these on the respective hosted runners, including Intel and
+Apple Silicon macOS targets. It uploads artifacts without publishing a release.
+
+Builds are unsigned development distributions until signing is configured.
+Configure Apple Developer signing/notarization and Windows code signing before
+external distribution; do not ask staff to bypass OS security warnings. The
+workflow currently disables automatic certificate discovery for reproducibility.
+There is no automatic updater yet: distribute tested new installers explicitly.
+The hosted CMS must be available over HTTPS before these are useful to staff.

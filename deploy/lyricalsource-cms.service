@@ -1,0 +1,23 @@
+[Unit]
+Description=LyricalSource editorial CMS
+After=network.target
+
+[Service]
+Type=simple
+User=lyricalsource
+Group=lyricalsource
+WorkingDirectory=/opt/lyricalsource-cms
+Environment=NODE_ENV=production
+Environment=CMS_ENV_FILE=/etc/lyricalsource-cms.env
+ExecStart=/usr/bin/node /opt/lyricalsource-cms/src/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lyricalsource-cms
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

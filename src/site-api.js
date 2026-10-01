@@ -14,4 +14,19 @@ async function request(method, route, body, multipart = false) {
   if (!response.ok) throw new Error(data.error || `Site API returned ${response.status}`);
   return data;
 }
-module.exports = { request };
+
+async function authenticate(email, password) {
+  const response = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status === 401 || response.status === 403) return false;
+  if (!response.ok) throw new Error(`Site login returned ${response.status}`);
+  const data = await response.json().catch(() => null);
+  if (data?.ok !== true) throw new Error('Site login returned an unexpected response');
+  return true;
+}
+module.exports = { request, authenticate };

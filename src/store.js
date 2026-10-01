@@ -28,6 +28,26 @@ CREATE TABLE IF NOT EXISTS article_owners (
 );
 `);
 
+// Add avatar choices without replacing existing staff records.
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'avatar')) {
+  db.exec("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT 'sage'");
+}
+
+// Stable staff usernames; existing accounts keep their email and password.
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'username')) {
+  db.exec('ALTER TABLE users ADD COLUMN username TEXT COLLATE NOCASE');
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username COLLATE NOCASE)');
+function assignUsernames() {
+  db.transaction(() => {
+    for (const user of db.prepare('SELECT id FROM users WHERE username IS NULL').all()) {
+      let username = `staff${user.id}`;
+      while (db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(username)) username += '_';
+      db.prepare('UPDATE users SET username=? WHERE id=?').run(username, user.id);
+    }
+  })();
+}
+
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -43,11 +63,12 @@ function verifyPassword(password, stored) {
 }
 function bootstrap() {
   const email = process.env.CMS_SUPERUSER_EMAIL?.toLowerCase().trim();
-  const password = process.env.CMS_SUPERUSER_PASSWORD;
+  const password = process.env.CMS_AUTH_PROVIDER === 'site' ? crypto.randomBytes(32).toString('hex') : process.env.CMS_SUPERUSER_PASSWORD;
   if (!email || !password) return;
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (!existing) db.prepare('INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, ?)')
     .run(email, 'Superuser', hashPassword(password), 'superuser');
 }
 bootstrap();
+assignUsernames();
 module.exports = { db, digest, hashPassword, verifyPassword };

@@ -1,0 +1,63 @@
+{
+  "name": "lyricalsource-desktop",
+  "productName": "LyricalSource CMS",
+  "version": "1.0.0",
+  "description": "Shared LyricalSource editorial desktop workspace",
+  "author": "LyricalSource",
+  "license": "ISC",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "test": "node --test test/*.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish never"
+  },
+  "build": {
+    "appId": "com.lyricalsource.cms",
+    "productName": "LyricalSource CMS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "policy.js",
+      "preload.js",
+      "setup.html",
+      "setup.js",
+      "icons/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "icons/icon.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "icons/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "icons/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "npmRebuild": false
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  }
+}

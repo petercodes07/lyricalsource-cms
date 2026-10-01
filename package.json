@@ -10,7 +10,14 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "setup:local": "node scripts/setup-local.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "demo": "node scripts/demo.js",
+    "backup": "node scripts/backup.js",
+    "desktop:setup": "npm ci --prefix desktop",
+    "desktop": "npm start --prefix desktop",
+    "desktop:demo": "npm run demo --prefix desktop",
+    "desktop:dist": "npm run dist --prefix desktop",
+    "desktop:test": "npm test --prefix desktop"
   },
   "keywords": [],
   "author": "",
