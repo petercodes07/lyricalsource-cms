@@ -2,6 +2,8 @@
 
 A separate, private staff website for editing LyricalSource articles. It does not connect to the public site's database. The CMS stores staff accounts and invitations in its own SQLite file and sends article changes to the site's authenticated publishing API.
 
+See [PLAN.md](PLAN.md) for the shared Windows, macOS, and Linux app release plan and the remaining work.
+
 ## Run locally
 
 With Docker installed, clone both repositories into the same parent directory:
