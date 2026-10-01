@@ -1,5 +1,11 @@
 # LyricalSource CMS
 
+Download the latest Windows, macOS or Linux installer from the [desktop releases page](https://github.com/petercodes07/lyricalsource-cms/releases/latest). The desktop **Help** menu shows its version and links to updates. Install a new release manually; automatic updating is not enabled.
+
+Album and playlist editors support cover previews, image uploads through the site's media API, and formatted descriptions. Confirm that the companion site renders description HTML correctly before rollout. Failed saves retain the current form and selected files. Playlist songs can be added, removed and reordered; album track editing remains limited to the linked song editor until the site's album membership/ordering API is verified.
+
+Local staff password recovery requires working SMTP configuration. Reset links expire after 30 minutes, work once, and revoke existing sessions. Site-authenticated staff use the public site's password recovery; set `SITE_PASSWORD_RESET_URL` to its verified HTTPS recovery page. The CMS cannot reset a public site password.
+
 A separate, private staff website for editing LyricalSource articles. It does not connect to the public site's database. The CMS stores staff accounts and invitations in its own SQLite file and sends article changes to the site's authenticated publishing API.
 
 See [PLAN.md](PLAN.md) for the shared Windows, macOS, and Linux app release plan and the remaining work.

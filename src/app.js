@@ -43,7 +43,7 @@ app.get('/manifest.webmanifest', (req, res) => {
   res.json({ ...manifest, id: cmsUrl('/'), start_url: cmsUrl('/'), scope: cmsUrl('/'), icons: manifest.icons.map(icon => ({ ...icon, src: cmsUrl(icon.src) })) });
 });
 app.use(express.static(path.join(__dirname, '../public'), { index: false, redirect: false, dotfiles: 'deny' }));
-app.get('/install', (req, res) => res.send(layout('Install', req.user, `<p class="eyebrow">YOUR WORKSPACE, ANYWHERE</p><h1>Make room for your next story.</h1><p class="lead">Install LyricalSource CMS on your computer for quick access to your team's shared workspace.</p><div class="card"><h2>Install the app</h2><button data-install hidden>Install LyricalSource CMS</button><p data-install-help>In Chrome or Edge, use the install option in the address bar or browser menu. On supported macOS Safari versions, choose File → Add to Dock.</p><p>Installation depends on your browser. You can always use this workspace in a browser on Windows, macOS or Linux.</p><p>Keep an internet connection while saving, uploading and publishing. Your team sees the same shared content.</p><a href="/">Open workspace →</a></div>`)));
+app.get('/install', (req, res) => res.send(layout('Install', req.user, `<p class="eyebrow">YOUR WORKSPACE, ANYWHERE</p><h1>Make room for your next story.</h1><p class="lead">Install LyricalSource CMS on your computer for quick access to your team's shared workspace.</p><div class="card"><h2>Download the desktop app</h2><p>Windows, macOS and Linux installers are listed with each release.</p><a class="button" href="https://github.com/petercodes07/lyricalsource-cms/releases/latest" target="_blank" rel="noopener noreferrer">Download the latest installer</a><h2>Install from your browser</h2><button data-install hidden>Install LyricalSource CMS</button><p data-install-help>In Chrome or Edge, use the install option in the address bar or browser menu. On supported macOS Safari versions, choose File → Add to Dock.</p><p>Installation depends on your browser. You can always use this workspace in a browser on Windows, macOS or Linux.</p><p>Keep an internet connection while saving, uploading and publishing. Your team sees the same shared content.</p><a href="/">Open workspace →</a></div>`)));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const randomToken = () => crypto.randomBytes(32).toString('hex');
 const sitePublic = (process.env.SITE_PUBLIC_URL || process.env.SITE_API_URL).replace(/\/$/, '');
@@ -99,8 +99,14 @@ function articleForm(article = {}, error = '', canPublish = true, viewUrl = '') 
 
 const postTypes = { news: 'News', blog: 'Blog', album: 'Album', playlist: 'Playlist' };
 const attempts = new Map();
+require('./password-reset')(app, { db, digest, hashPassword, sendMail: async (to, subject, text) => {
+  const port = Number(process.env.SMTP_PORT || 587);
+  const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST, port, secure: port === 465,
+    auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : undefined });
+  await transport.sendMail({ from: process.env.SMTP_FROM, to, subject, text });
+} });
 app.get('/login', (req, res) => req.user ? redirect(res, '/') : res.send(layout('Login', null,
-  `<h1>Staff login</h1>${siteAuth ? '<p>Use your LyricalSource site account. CMS access requires a staff invitation.</p>' : process.env.CMS_DEMO_MODE === '1' ? '<p>Local demo account</p>' : '<p>Use your CMS staff account. This login is separate from your public site account.</p>'}<form method="post" action="/login" class="card short"><label>Email or username<input type="text" name="email" required autocomplete="username"></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button>Log in</button></form>`, req.query.error)));
+  `<h1>Staff login</h1>${siteAuth ? '<p>Use your LyricalSource site account. CMS access requires a staff invitation.</p>' : process.env.CMS_DEMO_MODE === '1' ? '<p>Local demo account</p>' : '<p>Use your CMS staff account. This login is separate from your public site account.</p>'}<form method="post" action="/login" class="card short"><label>Email or username<input type="text" name="email" required autocomplete="username"></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button>Log in</button><p><a href="/forgot-password">Forgot password?</a></p></form>`, req.query.error)));
 app.post('/login', async (req, res) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const password = String(req.body.password || '');
@@ -262,14 +268,16 @@ function songForm(song, error = '') {
     <form data-editor-form method="post" class="card" action="/songs/${Number(song.id)}">
     <label>Display title<input name="title" required maxlength="300" value="${e(song.title)}"></label>
     <label>Song name<input name="songName" required maxlength="300" value="${e(song.songName)}"></label>
-    <p>The song URL stays the same. Saving updates the public song immediately.</p><button>Save song</button></form>`;
+    <p>The song URL stays the same. Saving updates the public song immediately.</p><p class="save-status" role="status" data-save-status>All changes saved.</p><button>Save song</button></form>`;
 }
 app.get('/songs', requireLogin, requirePublisher, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim().slice(0, 200);
-    const { songs } = await request('GET', `songs?q=${encodeURIComponent(q)}`);
-    const rows = songs.map(song => `<tr><td><a href="/songs/${Number(song.id)}">${e(song.title)}</a></td><td>${e(song.songName)}</td><td>${e(song.artistName)}</td><td>${editLink(`/songs/${Number(song.id)}`, song.title)}</td></tr>`).join('');
-    res.send(layout('Songs', req.user, `<h1>Songs</h1><form method="get"><label>Search title or song name<input name="q" value="${e(q)}" maxlength="200"></label><button>Search</button></form><table><tr><th>Title</th><th>Song name</th><th>Artist</th><th>Actions</th></tr>${rows || '<tr><td colspan="4">No songs found.</td></tr>'}</table>`));
+    const data = await request('GET', `songs?q=${encodeURIComponent(q)}`);
+    const page=Math.max(1,Math.floor(Number(req.query.page)||1));
+    const total=data.songs.length; const songs=data.songs.slice((page-1)*50,page*50);
+    const rows = songs.map(song => `<tr><td><div class="story-cell">${require('./library-ui').cover(song.image,sitePublic,song.title)}<a class="story-title" href="/songs/${Number(song.id)}">${e(song.title)}</a></div></td><td>${e(song.songName)}</td><td>${e(song.artistName)}</td><td>${editLink(`/songs/${Number(song.id)}`, song.title)}</td></tr>`).join('');
+    res.send(layout('Songs', req.user, `<h1>Songs</h1><form method="get"><label>Search title or song name<input name="q" value="${e(q)}" maxlength="200"></label><button>Search</button></form><div class="card table-card"><table><tr><th>Title</th><th>Song name</th><th>Artist</th><th>Actions</th></tr>${rows || '<tr><td colspan="4">No songs found. Try another search.</td></tr>'}</table></div><p>${total} songs</p><nav aria-label="Pagination">${page>1?`<a class="button secondary" href="/songs?page=${page-1}&q=${encodeURIComponent(q)}">Previous</a>`:''} ${page*50<total?`<a class="button secondary" href="/songs?page=${page+1}&q=${encodeURIComponent(q)}">Next</a>`:''}</nav>`));
   } catch { res.status(502).send(layout('Songs', req.user, '<h1>Song connection unavailable</h1><p>The connected site needs the CMS song API. No changes were saved.</p>')); }
 });
 app.get('/songs/:id', requireLogin, requirePublisher, async (req, res) => {

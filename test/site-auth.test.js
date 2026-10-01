@@ -61,6 +61,7 @@ test('CMS login checks the LyricalSource site and local staff membership', async
   } finally {
     await new Promise(resolve => cms.close(resolve));
     await new Promise(resolve => site.close(resolve));
+    require('../src/store').db.close();
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });

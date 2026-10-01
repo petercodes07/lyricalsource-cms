@@ -16,3 +16,5 @@
 .playlist-selected li,.playlist-results>div{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line,#dce4e9)}
 .playlist-selected span,.playlist-results span{flex:1}.playlist-selected button{padding:6px 10px}.playlist-results{max-height:360px;overflow:auto;margin-top:16px}
 .library-edit{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}.album-summary{display:flex;align-items:center;gap:20px;margin:24px 0}.album-summary .story-thumb{width:120px;height:120px;flex-shrink:0}.album-summary h2{margin:0}
+
+.cover-preview{display:block;width:180px;height:180px;object-fit:cover;border-radius:12px;margin:16px 0}.cover-preview[hidden]{display:none}.password-toggle{margin:8px 0 12px;font-size:13px}nav[aria-label="Pagination"]{display:flex;gap:12px;margin:20px 0}.toolbar button{min-height:40px}.save-status{min-height:24px}button:disabled{opacity:.6;cursor:wait}

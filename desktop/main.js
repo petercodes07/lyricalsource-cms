@@ -42,7 +42,8 @@ else {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
       { label: 'Workspace', submenu: [{ label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => workspace?.webContents.reload() }, { role: 'close' }] },
-      { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }
+      { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+      { label: 'Help', submenu: [{ label: 'About LyricalSource CMS', click: () => dialog.showMessageBox({ type: 'info', message: 'LyricalSource CMS', detail: `Version ${app.getVersion()}\nConnected to the shared LyricalSource CMS.\nUpdates are installed manually from the latest release.` }) }, { label: 'Check for updates', click: () => shell.openExternal('https://github.com/petercodes07/lyricalsource-cms/releases/latest') }] }
     ]));
     openWorkspace(startupWorkspace({ packaged: app.isPackaged, args: process.argv }));
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) openWorkspace(origin || startupWorkspace({ packaged: app.isPackaged, args: process.argv })); });

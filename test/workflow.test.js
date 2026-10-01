@@ -239,6 +239,7 @@ test('staff can invite, draft and publish with role checks', async () => {
   } finally {
     await new Promise(resolve => cms.close(resolve));
     await new Promise(resolve => site.close(resolve));
+    require('../src/store').db.close();
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });

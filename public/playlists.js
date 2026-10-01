@@ -8,7 +8,7 @@
     const input=document.createElement('input'); input.type='hidden';input.name='songIds';input.value=song.id;li.append(input);
     const text=document.createElement('span');text.textContent=`${song.songName || song.title} — ${song.artistName || ''}`;li.append(text);
     for(const [label,attribute,value] of [['↑','data-move','up'],['↓','data-move','down'],['Remove','data-remove','']]) {const button=document.createElement('button');button.type='button';button.textContent=label;button.setAttribute(attribute,value); if(value)button.setAttribute('aria-label',`Move song ${value}`);li.append(button);}
-    list.append(li);status.textContent=`${list.children.length} songs selected`;
+    list.append(li);status.textContent=`${list.children.length} songs selected`;form.dispatchEvent(new Event('editor-change'));
   }
   list.addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button)return;const li=button.closest('li');
@@ -16,6 +16,7 @@
     if(button.dataset.move==='up'&&li.previousElementSibling)list.insertBefore(li,li.previousElementSibling);
     if(button.dataset.move==='down'&&li.nextElementSibling)list.insertBefore(li.nextElementSibling,li);
     status.textContent=`${list.children.length} songs selected`;
+    form.dispatchEvent(new Event('editor-change'));
   });
   let controller;
   async function search(){
@@ -29,5 +30,5 @@
   }
   form.querySelector('[data-find-songs]').onclick=search;
   query.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();search();}});
-  form.addEventListener('submit',event=>{if(!list.children.length){event.preventDefault();status.textContent='Add at least one song before saving.';query.focus();}});
+  form.addEventListener('submit',event=>{if(!list.children.length){event.preventDefault();status.textContent='Add at least one song before saving.';query.focus();}},true);
 })();
