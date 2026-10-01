@@ -135,7 +135,7 @@ const usernameField = value => `<label>Username<input name="username" value="${e
 app.get('/account', requireLogin, (req, res) => res.send(layout('Account', req.user,
   `<h1>Account settings</h1><form class="card short" method="post" action="/account/profile"><h2>Profile</h2><label>Display name<input name="name" required maxlength="100" value="${e(req.user.name)}"></label>${usernameField(req.user.username)}<button>Save profile</button></form>` + (siteAuth
   ? '<p>Your password is managed by your LyricalSource site account.</p>'
-  : '<h2>Change password</h2><form class="card short" method="post" action="/account"><label>Current password<input type="password" name="current" required></label><label>New password (12+ characters)<input type="password" name="password" minlength="12" required></label><button>Change password</button></form>'), req.query.notice)));
+  : '<h2>Change password</h2><form class="card short" method="post" action="/account"><label>Current password<input type="password" name="current" required></label><label>New password<input type="password" name="password" required></label><button>Change password</button></form>'), req.query.notice)));
 app.post('/account/profile', requireLogin, (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
   const name = String(req.body.name || '').trim();
@@ -149,7 +149,7 @@ app.post('/account', requireLogin, (req, res) => {
   if (siteAuth) return res.status(403).send('Password is managed by the LyricalSource site');
   const row = db.prepare('SELECT password_hash FROM users WHERE id=?').get(req.user.id);
   if (!verifyPassword(String(req.body.current || ''), row.password_hash)) return redirect(res, '/account?notice=Current+password+is+incorrect');
-  if (String(req.body.password || '').length < 12) return redirect(res, '/account?notice=Use+at+least+12+characters');
+  if (!String(req.body.password || '').length) return redirect(res, '/account?notice=Enter+a+new+password');
   db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(req.body.password), req.user.id);
   db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
   redirect(res, '/login?error=Password+changed.+Log+in+again');
@@ -336,7 +336,7 @@ app.post('/team/users/:id', requireLogin, requireManager, (req, res) => {
 app.get('/invite/:token', (req, res) => {
   const invite = db.prepare('SELECT email,role FROM invites WHERE token_hash=? AND expires_at>? AND accepted_at IS NULL AND revoked_at IS NULL').get(digest(req.params.token), Date.now());
   if (!invite) return res.status(410).send('Invitation expired or unavailable');
-  res.send(layout('Accept invitation', null, `<h1>Join LyricalSource CMS</h1><p>${e(invite.email)} · ${e(invite.role)}</p>${siteAuth ? '<p>Sign in with this email and your LyricalSource site password after accepting.</p>' : ''}<form method="post" class="card short"><label>Name<input name="name" required></label>${usernameField('')}${siteAuth ? '' : '<label>Password (12+ characters)<input type="password" name="password" minlength="12" required></label>'}<button>Create account</button></form>`, req.query.error));
+  res.send(layout('Accept invitation', null, `<h1>Join LyricalSource CMS</h1><p>${e(invite.email)} · ${e(invite.role)}</p>${siteAuth ? '<p>Sign in with this email and your LyricalSource site password after accepting.</p>' : ''}<form method="post" class="card short"><label>Name<input name="name" required></label>${usernameField('')}${siteAuth ? '' : '<label>Password<input type="password" name="password" required></label>'}<button>Create account</button></form>`, req.query.error));
 });
 app.post('/invite/:token', (req, res) => {
   const invite = db.prepare('SELECT * FROM invites WHERE token_hash=? AND expires_at>? AND accepted_at IS NULL AND revoked_at IS NULL').get(digest(req.params.token), Date.now());
@@ -345,7 +345,7 @@ app.post('/invite/:token', (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
   if (username && (!/^[a-z0-9_]{3,30}$/.test(username) || db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(username))) return redirect(res, `/invite/${req.params.token}?error=Username+invalid+or+already+taken`);
   const password = siteAuth ? randomToken() : String(req.body.password || '');
-  if (!name || password.length < 12) return redirect(res, `/invite/${req.params.token}?error=Name+and+12-character+password+required`);
+  if (!name || !password.length) return redirect(res, `/invite/${req.params.token}?error=Name+and+password+required`);
   try {
     db.transaction(() => {
       const created = db.prepare('INSERT INTO users (email,name,password_hash,role,username) VALUES (?,?,?,?,?)').run(invite.email, name, hashPassword(password), invite.role, username || null);

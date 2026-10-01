@@ -90,17 +90,17 @@ test('staff can invite, draft and publish with role checks', async () => {
     const html = await invite.text();
     const token = html.match(/\/invite\/([a-f0-9]{64})/)?.[1];
     assert.ok(token);
-    const accepted = await post(`/invite/${token}`, { name: 'Writer', username: 'cms_writer', password: 'writer-password-1234' });
+    const accepted = await post(`/invite/${token}`, { name: 'Writer', username: 'cms_writer', password: '12344321' });
     assert.equal(accepted.status, 302);
     const reuse = await post(`/invite/${token}`, { name: 'Other', password: 'other-password-1234' });
     assert.equal(reuse.status, 410);
-    const writerLogin = await post('/login', { email: 'writer@example.com', password: 'writer-password-1234' });
+    const writerLogin = await post('/login', { email: 'writer@example.com', password: '12344321' });
     const writerCookie = writerLogin.headers.get('set-cookie').split(';')[0];
     const duplicateUsername = await post('/account/profile', { name: 'Writer', username: 'CMS_OWNER' }, writerCookie);
     assert.match(duplicateUsername.headers.get('location'), /Username\+already\+taken/);
     const teamPage = await (await fetch(base + '/team', { headers: { cookie: ownerCookie } })).text();
     assert.match(teamPage, /cms_writer/);
-    assert.ok((await post('/login', { email: 'cms_writer', password: 'writer-password-1234' })).headers.get('set-cookie'));
+    assert.ok((await post('/login', { email: 'cms_writer', password: '12344321' })).headers.get('set-cookie'));
 
     assert.equal((await post('/songs/7', { title: 'Author edit', songName: 'Author edit' }, writerCookie)).status, 403);
     assert.equal(song.title, 'Renamed title');
@@ -225,6 +225,15 @@ test('staff can invite, draft and publish with role checks', async () => {
     assert.equal(playlistUpdate.status, 302);
     assert.equal(playlists.get('collection').name, 'Updated collection');
     assert.equal((await post('/playlists/new', { name: 'Collection', slug: 'collection', songIds: '7' })).headers.get('location'), '/login');
+    const accountHtml = await (await fetch(base + '/account', { headers: { cookie: ownerCookie } })).text();
+    assert.doesNotMatch(accountHtml, /12\+ characters|minlength="12"/);
+    const blankPassword = await post('/account', { current: 'test-password-1234', password: '' }, ownerCookie);
+    assert.match(blankPassword.headers.get('location'), /Enter\+a\+new\+password/);
+    const wrongCurrent = await post('/account', { current: 'incorrect', password: '12344321' }, ownerCookie);
+    assert.match(wrongCurrent.headers.get('location'), /Current\+password\+is\+incorrect/);
+    const shortPassword = await post('/account', { current: 'test-password-1234', password: '12344321' }, ownerCookie);
+    assert.match(shortPassword.headers.get('location'), /Password\+changed/);
+    assert.ok((await post('/login', { email: 'cms_owner', password: '12344321' })).headers.get('set-cookie'));
     const teamDenied = await fetch(base + '/team', { headers: { cookie: writerCookie }, redirect: 'manual' });
     assert.equal(teamDenied.status, 403);
   } finally {
