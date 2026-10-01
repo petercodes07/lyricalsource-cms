@@ -24,6 +24,13 @@ test('CMS behind /cms keeps forms, redirects, assets and manifest in scope', asy
     const login = await fetch(base+'/login', { method: 'POST', redirect: 'manual', headers: { origin: 'https://lyricalsource.com', 'content-type':'application/x-www-form-urlencoded' }, body: new URLSearchParams({ email:'prefix-test@example.com', password:'isolated-test-password' }) });
     assert.equal(login.status,302); assert.equal(login.headers.get('location'),'/cms/');
     assert.match(login.headers.get('set-cookie'), /Secure/);
+    assert.match(login.headers.get('set-cookie'), /Path=\/cms;/);
+    assert.doesNotMatch(login.headers.get('set-cookie'), /Path=\/cms\//);
+    const sessionCookie=login.headers.get('set-cookie').split(';')[0];
+    const canonicalWorkspace=await fetch(base+'/cms', {headers:{cookie:sessionCookie},redirect:'manual'});
+    assert.equal(canonicalWorkspace.status,200);
+    assert.match(await canonicalWorkspace.text(), /Your stories/);
+    assert.match(canonicalWorkspace.headers.get('set-cookie'), /Path=\/cms\/; Max-Age=0/);
     const manifest = await (await fetch(base+'/manifest.webmanifest')).json();
     assert.equal(manifest.scope,'/cms/'); assert.equal(manifest.start_url,'/cms/');
     assert.equal(manifest.icons[0].src,'/cms/icons/icon-192.png');

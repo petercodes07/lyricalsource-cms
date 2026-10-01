@@ -29,6 +29,8 @@ app.use((req, res, next) => {
     const expected = new URL(process.env.CMS_BASE_URL || `http://${req.get('host')}`).origin;
     if (origin && origin !== expected) return res.status(403).send('Invalid request origin');
   }
+  // Retire the old trailing-slash cookie, which excludes the canonical /cms URL.
+  if (cmsPath) res.append('Set-Cookie', `cms_session=; HttpOnly; SameSite=Strict; Path=${cmsPath}/; Max-Age=0${secureCookie(req)}`);
   const raw = /(?:^|;\s*)cms_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   if (raw) {
     req.user = db.prepare(`SELECT u.id, u.email, u.name, u.username, u.role, u.avatar FROM sessions s JOIN users u ON u.id=s.user_id
@@ -40,7 +42,7 @@ app.get('/manifest.webmanifest', (req, res) => {
   const manifest = require('../public/manifest.webmanifest.json');
   res.json({ ...manifest, id: cmsUrl('/'), start_url: cmsUrl('/'), scope: cmsUrl('/'), icons: manifest.icons.map(icon => ({ ...icon, src: cmsUrl(icon.src) })) });
 });
-app.use(express.static(path.join(__dirname, '../public'), { index: false, dotfiles: 'deny' }));
+app.use(express.static(path.join(__dirname, '../public'), { index: false, redirect: false, dotfiles: 'deny' }));
 app.get('/install', (req, res) => res.send(layout('Install', req.user, `<p class="eyebrow">YOUR WORKSPACE, ANYWHERE</p><h1>Make room for your next story.</h1><p class="lead">Install LyricalSource CMS on your computer for quick access to your team's shared workspace.</p><div class="card"><h2>Install the app</h2><button data-install hidden>Install LyricalSource CMS</button><p data-install-help>In Chrome or Edge, use the install option in the address bar or browser menu. On supported macOS Safari versions, choose File → Add to Dock.</p><p>Installation depends on your browser. You can always use this workspace in a browser on Windows, macOS or Linux.</p><p>Keep an internet connection while saving, uploading and publishing. Your team sees the same shared content.</p><a href="/">Open workspace →</a></div>`)));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const randomToken = () => crypto.randomBytes(32).toString('hex');
@@ -122,13 +124,13 @@ app.post('/login', async (req, res) => {
   attempts.delete(key);
   const token = randomToken();
   db.prepare('INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,?,?)').run(digest(token), user.id, Date.now() + 12 * 3600 * 1000);
-  res.set('Set-Cookie', `cms_session=${token}; HttpOnly; SameSite=Strict; Path=${cmsUrl('/')}; Max-Age=43200${secureCookie(req)}`);
+  res.set('Set-Cookie', `cms_session=${token}; HttpOnly; SameSite=Strict; Path=${cmsPath || '/'}; Max-Age=43200${secureCookie(req)}`);
   redirect(res, '/');
 });
 app.post('/logout', requireLogin, (req, res) => {
   const token = /(?:^|;\s*)cms_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token));
-  res.set('Set-Cookie', `cms_session=; HttpOnly; SameSite=Strict; Path=${cmsUrl('/')}; Max-Age=0${secureCookie(req)}`);
+  res.set('Set-Cookie', `cms_session=; HttpOnly; SameSite=Strict; Path=${cmsPath || '/'}; Max-Age=0${secureCookie(req)}`);
   redirect(res, '/login');
 });
 const usernameField = value => `<label>Username<input name="username" value="${e(value || '')}" required minlength="3" maxlength="30" pattern="[a-zA-Z0-9_]{3,30}" autocomplete="username"><small>3–30 letters, numbers, or underscores.</small></label>`;
