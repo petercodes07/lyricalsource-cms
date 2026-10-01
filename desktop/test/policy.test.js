@@ -27,3 +27,16 @@ test('CMS subpath workspaces stay confined to /cms', () => {
   assert.ok(sameWorkspace('https://lyricalsource.com/cms/articles/1', 'https://lyricalsource.com/cms'));
   for (const value of ['https://lyricalsource.com/cms-other', 'https://lyricalsource.com/', 'https://other.example/cms']) assert.equal(sameWorkspace(value, 'https://lyricalsource.com/cms'), false);
 });
+
+test('Windows and Mac launch the shared CMS without a saved workspace', () => {
+  const { SHARED_WORKSPACE, startupWorkspace } = require('../workspace');
+  assert.equal(SHARED_WORKSPACE, 'https://lyricalsourcecom.dbm.shared-servers.com/cms');
+  assert.equal(startupWorkspace(), SHARED_WORKSPACE);
+  assert.equal(startupWorkspace({ packaged: false, args: [] }), SHARED_WORKSPACE);
+  assert.equal(startupWorkspace({ packaged: true, args: ['--demo', '--ssh-workspace'] }), SHARED_WORKSPACE);
+  assert.equal(startupWorkspace({ packaged: false, args: ['--demo'] }), 'http://127.0.0.1:3100');
+  const fs = require('node:fs'), path = require('node:path');
+  const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
+  assert.doesNotMatch(main, /workspace\.json|showSetup|Connection settings|workspace:connect/);
+  assert.ok(require('../package.json').build.files.includes('workspace.js'));
+});

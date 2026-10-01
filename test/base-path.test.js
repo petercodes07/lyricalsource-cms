@@ -14,6 +14,11 @@ test('CMS behind /cms keeps forms, redirects, assets and manifest in scope', asy
   await new Promise(resolve => cms.once('listening',resolve));
   const base = `http://127.0.0.1:${cms.address().port}`;
   try {
+    const prefixedLogin = await fetch(base+'/cms/login');
+    assert.equal(prefixedLogin.status,200);
+    assert.equal((await fetch(base+'/cms/app.css')).status,200);
+    const protectedPage = await fetch(base+'/cms/', { redirect: 'manual' });
+    assert.equal(protectedPage.headers.get('location'),'/cms/login');
     const html = await (await fetch(base+'/login')).text();
     assert.match(html, /action="\/cms\/login"/); assert.match(html, /href="\/cms\/app.css"/);
     const login = await fetch(base+'/login', { method: 'POST', redirect: 'manual', headers: { origin: 'https://lyricalsource.com', 'content-type':'application/x-www-form-urlencoded' }, body: new URLSearchParams({ email:'prefix-test@example.com', password:'isolated-test-password' }) });

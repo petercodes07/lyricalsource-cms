@@ -134,12 +134,12 @@ npm run desktop:setup
 npm run desktop
 ```
 
-On first launch, enter your team's **HTTPS CMS root address**. The app remembers
-the address and stores its login session in the OS user profile. Use
-**Workspace → Connection settings** to change servers. The setup screen is the
-only renderer with a narrow settings bridge; remote CMS content has no Node or
-IPC access. External HTTPS links require confirmation and open in the system
-browser. Cross-origin redirects and unexpected permissions are blocked.
+Windows and Mac launch directly into the shared LyricalSource CMS at
+`https://lyricalsourcecom.dbm.shared-servers.com/cms`. There is no workspace
+address setup. Staff sign in with their username or email and password; sessions
+are stored in the OS user profile. Remote CMS content has no Node or IPC access.
+External HTTPS links require confirmation and open in the system browser.
+Cross-origin redirects and unexpected permissions are blocked.
 
 For local development, leave `npm run demo` running in one terminal and run
 `npm run desktop:demo` in another. The HTTP loopback exception is available only

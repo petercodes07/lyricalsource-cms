@@ -1,7 +1,7 @@
 {
   "name": "lyricalsource-desktop",
   "productName": "LyricalSource CMS",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared LyricalSource editorial desktop workspace",
   "author": "LyricalSource",
   "license": "ISC",
@@ -22,9 +22,7 @@
     "files": [
       "main.js",
       "policy.js",
-      "preload.js",
-      "setup.html",
-      "setup.js",
+      "workspace.js",
       "icons/*",
       "package.json"
     ],

@@ -11,6 +11,13 @@ const { escape: e, layout, cmsUrl } = require('./views');
 
 const app = express();
 app.disable('x-powered-by');
+// Support the shared /cms address as well as requests stripped by its proxy.
+const cmsPath = new URL(process.env.CMS_BASE_URL || 'http://127.0.0.1:3100').pathname.replace(/\/$/, '');
+app.use((req, res, next) => {
+  if (cmsPath && (req.url === cmsPath || req.url.startsWith(cmsPath + '/') || req.url.startsWith(cmsPath + '?'))) req.url = req.url.slice(cmsPath.length) || '/';
+  if (req.url.startsWith('?')) req.url = '/' + req.url;
+  next();
+});
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store');
