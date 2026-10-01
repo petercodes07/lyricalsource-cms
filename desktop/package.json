@@ -1,7 +1,7 @@
 {
   "name": "lyricalsource-desktop",
   "productName": "LyricalSource CMS",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Shared LyricalSource editorial desktop workspace",
   "author": "LyricalSource",
   "license": "ISC",
@@ -41,6 +41,7 @@
       "icon": "icons/icon.png"
     },
     "linux": {
+      "maintainer": "LyricalSource",
       "target": [
         "AppImage",
         "deb"
