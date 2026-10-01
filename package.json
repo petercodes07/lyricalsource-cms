@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "setup:local": "node scripts/setup-local.js",
     "test": "node --test test/*.test.js"
   },
   "keywords": [],

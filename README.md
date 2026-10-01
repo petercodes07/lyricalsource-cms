@@ -4,11 +4,22 @@ A separate, private staff website for editing LyricalSource articles. It does no
 
 ## Run locally
 
-1. Clone this repository and the `lyricalsource` site repository side by side.
-2. In the site repository, apply `db/010_cms_publishing.sql` to a **test** MySQL database, then set the site's `.env.local` to that database. Start the site with `npm ci && npm run dev`.
-3. In this repository, run `npm ci`, copy `.env.example` to `.env.local`, and set `CMS_API_TOKEN` to the same long random value as the site's `CMS_API_TOKEN`.
-4. Set `CMS_SUPERUSER_EMAIL` and `CMS_SUPERUSER_PASSWORD` in this repository's `.env.local`. The account is created only if it does not already exist; changing the environment variable later does not reset its password.
-5. Run `npm start` and open `http://127.0.0.1:3100/login`.
+With Docker installed, clone both repositories into the same parent directory:
+
+```bash
+git clone -b cms-integration https://github.com/petercodes07/lyricalsource.git
+git clone https://github.com/petercodes07/lyricalsource-cms.git
+cd lyricalsource-cms
+npm ci
+CMS_SUPERUSER_PASSWORD='your-local-password' npm run setup:local
+docker compose up -d
+```
+
+The setup script creates ignored `.env.local` files for both apps and generates a matching API token. It does not overwrite existing environment files. Use the password supplied for the superuser when running setup. The superuser account is created only if it does not already exist; changing the environment variable later does not reset its password.
+
+In one terminal, run `cd ../lyricalsource && npm ci && npm run dev`. In another, run `cd lyricalsource-cms && npm start` from the parent directory. Open `http://127.0.0.1:3100/login`. The CMS uses port 3100, the site uses port 3000, and Docker binds test MySQL to `127.0.0.1:3307`. The test database is initialized with the site's base schema and migrations.
+
+Without Docker, create a compatible MySQL test database, apply the site's base schema followed by migrations 003 through 008 and 010, then set both apps' `.env.local` files from their examples. Never apply test setup scripts to a production database.
 
 The CMS binds to `127.0.0.1` by default. For a private network deployment, set `HOST`, `CMS_BASE_URL`, HTTPS, and network access controls deliberately. The CMS server needs to reach `SITE_API_URL` when publishing. Keep `.env.local`, the SQLite file, and the API token out of Git.
 

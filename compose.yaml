@@ -1,0 +1,28 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: lyricalsource_cms_dev
+      MYSQL_USER: lyricsuser
+      MYSQL_PASSWORD: local-dev-only
+      MYSQL_ROOT_PASSWORD: local-root-only
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - cms_mysql_data:/var/lib/mysql
+      - ../lyricalsource/db/000_content_schema.sql:/docker-entrypoint-initdb.d/000.sql:ro
+      - ../lyricalsource/db/003_users.sql:/docker-entrypoint-initdb.d/003.sql:ro
+      - ../lyricalsource/db/004_verification.sql:/docker-entrypoint-initdb.d/004.sql:ro
+      - ../lyricalsource/db/005_subscribers.sql:/docker-entrypoint-initdb.d/005.sql:ro
+      - ../lyricalsource/db/006_user_images.sql:/docker-entrypoint-initdb.d/006.sql:ro
+      - ../lyricalsource/db/007_subscription.sql:/docker-entrypoint-initdb.d/007.sql:ro
+      - ../lyricalsource/db/008_user_data.sql:/docker-entrypoint-initdb.d/008.sql:ro
+      - ../lyricalsource/db/010_cms_publishing.sql:/docker-entrypoint-initdb.d/010.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -plocal-root-only --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  cms_mysql_data:
