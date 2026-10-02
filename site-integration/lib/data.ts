@@ -595,10 +595,10 @@ export const getAllPages = cache(
     const [rows] = await (await getPool()).query<any[]>(
       "SELECT title, slug, content FROM pages ORDER BY title ASC"
     );
-    return rows.map((r: any) => ({ 
-      title: decodeHTMLEntities(r.title), 
-      slug: r.slug, 
-      content: decodeHTMLEntities(r.content) 
+    return rows.map((r: any) => ({
+      title: decodeHTMLEntities(r.title),
+      slug: r.slug,
+      content: decodeHTMLEntities(r.content)
     }));
   },
   ["all-pages"],
@@ -613,10 +613,10 @@ export const getPage = cache(
     );
     if (!rows.length) return null;
     const r = rows[0] as any;
-    return { 
-      title: decodeHTMLEntities(r.title), 
-      slug: r.slug, 
-      content: decodeHTMLEntities(r.content) 
+    return {
+      title: decodeHTMLEntities(r.title),
+      slug: r.slug,
+      content: decodeHTMLEntities(r.content)
     };
   },
   ["page"],
@@ -890,7 +890,7 @@ export const relatedPlaylists = cache(
       )
       LIMIT ?
     `, [songSlug, limit]);
-    
+
     return rows.map((r: any) => ({
       slug:        r.slug,
       name:        r.name,

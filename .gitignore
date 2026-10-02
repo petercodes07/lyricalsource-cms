@@ -7,3 +7,5 @@ data/
 desktop/dist/
 
 .DS_Store
+
+._*
