@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const sanitizeHtml = require('sanitize-html');
-const { db, digest, hashPassword, verifyPassword } = require('./store');
+const { db, digest, hashPasswordAsync, verifyPasswordAsync } = require('./store');
 const { request, authenticate } = require('./site-api');
 const { escape: e, layout, cmsUrl } = require('./views');
 
@@ -44,7 +44,23 @@ app.get('/manifest.webmanifest', (req, res) => {
 });
 app.use(express.static(path.join(__dirname, '../public'), { index: false, redirect: false, dotfiles: 'deny' }));
 app.get('/install', (req, res) => res.send(layout('Install', req.user, `<p class="eyebrow">YOUR WORKSPACE, ANYWHERE</p><h1>Make room for your next story.</h1><p class="lead">Install LyricalSource CMS on your computer for quick access to your team's shared workspace.</p><div class="card"><h2>Install the app</h2><button data-install hidden>Install LyricalSource CMS</button><p data-install-help>In Chrome or Edge, use the install option in the address bar or browser menu. On supported macOS Safari versions, choose File → Add to Dock.</p><p>Installation depends on your browser. You can always use this workspace in a browser on Windows, macOS or Linux.</p><p>Keep an internet connection while saving, uploading and publishing. Your team sees the same shared content.</p><a href="/">Open workspace →</a></div>`)));
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const { createLimit } = require('./resource-limit');
+const uploadWork = createLimit(2, 8);
+function imageUpload(req, res, next) {
+  uploadWork(async () => {
+    if (req.aborted || res.destroyed) return;
+    await new Promise((resolve, reject) => {
+      upload.single('imageFile')(req, res, error => error ? reject(error) : resolve());
+    });
+    const completed = new Promise(resolve => {
+      const done = () => { res.off('finish', done); res.off('close', done); resolve(); };
+      res.once('finish', done); res.once('close', done);
+    });
+    next();
+    await completed;
+  }).catch(next);
+}
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 16, parts: 20, fieldSize: 1024 * 1024 } });
 const randomToken = () => crypto.randomBytes(32).toString('hex');
 const sitePublic = (process.env.SITE_PUBLIC_URL || process.env.SITE_API_URL).replace(/\/$/, '');
 const siteAuth = process.env.CMS_AUTH_PROVIDER === 'site';
@@ -61,7 +77,7 @@ function canEdit(user, id) {
 function articlePayload(req, image, status) {
   return { title: req.body.title, slug: req.body.slug, body: req.body.body, excerpt: req.body.excerpt,
     author: req.body.author, image, tags: String(req.body.tags || '').split(',').map(v => v.trim()).filter(Boolean),
-    postType: req.body.postType, status, actor: req.user.email };
+    postType: req.body.postType, status, actor: req.user.email, version: Number(req.body.version), ownerId: req.user.id };
 }
 function editLink(url, title) {
   return `<a class="edit-link" href="${e(url)}" aria-label="${e(`Edit ${title}`)}" title="${e(`Edit ${title}`)}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg><span>Edit</span></a>`;
@@ -81,9 +97,9 @@ function articleForm(article = {}, error = '', canPublish = true, viewUrl = '') 
   const isNew = !article.id;
   const tags = Array.isArray(article.tags) ? article.tags.join(', ') : '';
   const safeBody = sanitizeHtml(article.body || '', { allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img','figure','figcaption']), allowedAttributes: { a: ['href','title'], img: ['src','alt'] } });
-  return `<h1>${isNew ? 'New article' : `Edit article #${Number(article.id)}`}</h1>${error ? `<p class="notice">${e(error)}</p>` : ''}
-    <form data-editor-form method="post" action="${isNew ? '/articles' : `/articles/${Number(article.id)}`}" enctype="multipart/form-data" onsubmit="document.getElementById('body').value=document.getElementById('editor').innerHTML">
-    <div class="row"><label>Title<input name="title" required maxlength="300" value="${e(article.title)}"></label><label>Slug<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" value="${e(article.slug)}"></label></div>
+  return `<h1>${isNew ? 'New article' : `Edit article #${Number(article.id)}`}</h1>${error ? `<p class="notice">${e(error)}</p>${article.id ? `<p><a href="/articles/${Number(article.id)}" target="_blank" rel="noopener noreferrer">Open latest version in another tab</a></p>` : ''}` : ''}
+    <form data-editor-form ${error ? 'data-unsaved="1"' : ''} ${isNew ? '' : `data-editing="articles/${Number(article.id)}"`} method="post" action="${isNew ? '/articles' : `/articles/${Number(article.id)}`}" enctype="multipart/form-data" onsubmit="document.getElementById('body').value=document.getElementById('editor').innerHTML">
+    <input type="hidden" name="version" value="${e(article.version)}"><div class="row"><label>Title<input name="title" required maxlength="300" value="${e(article.title)}"></label><label>Slug<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" value="${e(article.slug)}"></label></div>
     <div class="row"><label>Type<select name="postType">${Object.entries(postTypes).map(([value, label]) => `<option value="${value}" ${(article.postType || 'news') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label>Author byline<input name="author" required value="${e(article.author)}"></label></div>
     <label>Summary<textarea name="excerpt" maxlength="1000" style="min-height:90px">${e(article.excerpt)}</textarea></label>
     <label>Tags, separated by commas<input name="tags" value="${e(tags)}"></label>
@@ -94,31 +110,54 @@ function articleForm(article = {}, error = '', canPublish = true, viewUrl = '') 
     <p class="save-status" role="status" data-save-status>Changes are saved when you select Save.</p><p class="row actions"><button name="intent" value="save">${article.status === 'published' ? 'Save changes' : 'Save draft'}</button>
     ${canPublish && article.status !== 'published' ? '<button name="intent" value="publish">Publish</button>' : ''}${viewUrl ? `<a class="button secondary" href="${e(viewUrl)}" target="_blank" rel="noopener noreferrer">View page on website</a>` : ''}</p>
     ${viewUrl && article.status !== 'published' ? '<p class="save-status">Shows the saved draft. Save changes before viewing. Preview links expire in 15 minutes.</p>' : ''}
-    </form>${article.status === 'published' && canPublish ? `<form method="post" action="/articles/${Number(article.id)}/unpublish" onsubmit="return confirm('Unpublish this article? It will no longer be visible on the public site. Unsaved edits are not included.')"><button class="secondary danger">Unpublish article</button></form>` : ''}`;
+    </form>${article.status === 'published' && canPublish ? `<form method="post" action="/articles/${Number(article.id)}/unpublish" onsubmit="return confirm('Unpublish this article? It will no longer be visible on the public site. Unsaved edits are not included.')"><input type="hidden" name="version" value="${e(article.version)}"><button class="secondary danger">Unpublish article</button></form>` : ''}`;
 }
+
+app.post('/editing/:kind/:id', requireLogin, (req, res) => {
+  const { kind, id } = req.params;
+  if (!['articles','songs','albums','playlists'].includes(kind) || id.length > 200 || !/^[a-z0-9-]+$/i.test(id)) return res.sendStatus(400);
+  if (req.user.role === 'author' && (kind !== 'articles' || !canEdit(req.user, Number(id)))) return res.sendStatus(403);
+  const resource = `${kind}/${id}`, now = Date.now();
+  if (req.body?.leave === '1') {
+    db.prepare('DELETE FROM edit_presence WHERE resource=? AND user_id=?').run(resource, req.user.id);
+    return res.sendStatus(204);
+  }
+  // Keep a finite set of open documents per staff account; abandoned tabs expire.
+  const present = db.prepare('SELECT 1 FROM edit_presence WHERE user_id=? AND resource=?').get(req.user.id, resource);
+  if (!present && db.prepare('SELECT COUNT(*) AS total FROM edit_presence WHERE user_id=?').get(req.user.id).total >= 10) {
+    db.prepare('DELETE FROM edit_presence WHERE rowid=(SELECT rowid FROM edit_presence WHERE user_id=? ORDER BY expires_at LIMIT 1)').run(req.user.id);
+  }
+  db.prepare('INSERT INTO edit_presence (resource,user_id,expires_at) VALUES (?,?,?) ON CONFLICT(resource,user_id) DO UPDATE SET expires_at=excluded.expires_at').run(resource, req.user.id, now + 75000);
+  const editors = db.prepare('SELECT u.name FROM edit_presence p JOIN users u ON u.id=p.user_id WHERE p.resource=? AND p.user_id<>? AND p.expires_at>? AND u.active=1 LIMIT 20').all(resource, req.user.id, now);
+  res.json({ editors: editors.map(user => user.name) });
+});
 
 const postTypes = { news: 'News', blog: 'Blog', album: 'Album', playlist: 'Playlist' };
 const attempts = new Map();
+setInterval(() => { for (const [key, entry] of attempts) if (entry.until <= Date.now()) attempts.delete(key); }, 60000).unref();
 app.get('/login', (req, res) => req.user ? redirect(res, '/') : res.send(layout('Login', null,
   `<h1>Staff login</h1>${siteAuth ? '<p>Use your LyricalSource site account. CMS access requires a staff invitation.</p>' : process.env.CMS_DEMO_MODE === '1' ? '<p>Local demo account</p>' : '<p>Use your CMS staff account. This login is separate from your public site account.</p>'}<form method="post" action="/login" class="card short"><label>Email or username<input type="text" name="email" required autocomplete="username"></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button>Log in</button></form>`, req.query.error)));
 app.post('/login', async (req, res) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const password = String(req.body.password || '');
-  const key = `${req.ip}:${email}`;
+  if (email.length > 254 || password.length > 4096) return res.status(400).send('Login input is too long');
+  const key = email;
   const entry = attempts.get(key) || { count: 0, until: 0 };
   if (entry.count >= 6 && entry.until > Date.now()) return res.status(429).send('Try again later');
   const user = db.prepare('SELECT * FROM users WHERE (email=? COLLATE NOCASE OR username=? COLLATE NOCASE) AND active=1').get(email, email);
   let valid = false;
   if (user && password) {
     try {
-      valid = siteAuth ? await authenticate(user.email, password) : verifyPassword(password, user.password_hash);
+      valid = siteAuth ? await authenticate(user.email, password) : await verifyPasswordAsync(password, user.password_hash);
     } catch (error) {
       console.error('CMS site authentication unavailable:', error.message);
       return res.status(502).send(layout('Login', null, '<h1>Staff login unavailable</h1><p>Please try again shortly.</p>'));
     }
   }
   if (!valid) {
-    attempts.set(key, { count: entry.until > Date.now() ? entry.count + 1 : 1, until: Date.now() + 15 * 60 * 1000 });
+    if (attempts.size >= 10000 && !attempts.has(key)) attempts.delete(attempts.keys().next().value);
+    const latest = attempts.get(key);
+    attempts.set(key, { count: latest?.until > Date.now() ? latest.count + 1 : 1, until: Date.now() + 15 * 60 * 1000 });
     return redirect(res, '/login?error=Invalid+login');
   }
   attempts.delete(key);
@@ -147,12 +186,15 @@ app.post('/account/profile', requireLogin, (req, res) => {
   catch (error) { if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return redirect(res, '/account?notice=Username+already+taken'); throw error; }
   redirect(res, '/account?notice=Profile+saved');
 });
-app.post('/account', requireLogin, (req, res) => {
+app.post('/account', requireLogin, async (req, res) => {
   if (siteAuth) return res.status(403).send('Password is managed by the LyricalSource site');
+  if (String(req.body.current || '').length > 4096 || String(req.body.password || '').length > 4096) return res.status(400).send('Password input is too long');
   const row = db.prepare('SELECT password_hash FROM users WHERE id=?').get(req.user.id);
-  if (!verifyPassword(String(req.body.current || ''), row.password_hash)) return redirect(res, '/account?notice=Current+password+is+incorrect');
+  if (!await verifyPasswordAsync(String(req.body.current || ''), row.password_hash)) return redirect(res, '/account?notice=Current+password+is+incorrect');
   if (!String(req.body.password || '').length) return redirect(res, '/account?notice=Enter+a+new+password');
-  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(req.body.password), req.user.id);
+  const passwordHash = await hashPasswordAsync(String(req.body.password));
+  const changed = db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?').run(passwordHash, req.user.id, row.password_hash);
+  if (!changed.changes) return redirect(res, '/account?notice=Password+changed+in+another+session.+Try+again');
   db.prepare('DELETE FROM sessions WHERE user_id=?').run(req.user.id);
   redirect(res, '/login?error=Password+changed.+Log+in+again');
 });
@@ -161,22 +203,16 @@ app.get('/', requireLogin, async (req, res) => {
   if (req.query.type === 'album') return redirect(res, '/albums');
   if (req.query.type === 'playlist') return redirect(res, '/playlists');
   try {
-    const { articles } = await request('GET', 'articles');
-    let visible = req.user.role === 'author' ? articles.filter(a => canEdit(req.user, a.id) && a.status === 'draft') : articles;
     const q = String(req.query.q || '').trim().slice(0, 200);
     const status = ['published', 'draft'].includes(req.query.status) ? req.query.status : 'all';
     const type = Object.hasOwn(postTypes, req.query.type || '') ? req.query.type : 'all';
-    if (type !== 'all') visible = visible.filter(article => article.postType === type);
     const sort = ['oldest', 'title'].includes(req.query.sort) ? req.query.sort : 'newest';
-    const counts = { all: visible.length, published: visible.filter(a => a.status === 'published').length, draft: visible.filter(a => a.status === 'draft').length };
-    const filtered = visible.filter(a => (status === 'all' || a.status === status) && (type === 'all' || a.postType === type) &&
-      (!q || [a.title, a.slug, a.author, ...(Array.isArray(a.tags) ? a.tags : [])].join(' ').toLowerCase().includes(q.toLowerCase())));
-    filtered.sort((a, b) => {
-      if (sort === 'title') return String(a.title).localeCompare(String(b.title));
-      const first = Date.parse(a.updatedAt || a.publishedAt || '') || 0;
-      const second = Date.parse(b.updatedAt || b.publishedAt || '') || 0;
-      return (sort === 'oldest' ? first - second : second - first) || Number(b.id) - Number(a.id);
-    });
+    const page = Math.min(100000, Math.max(1, Math.floor(Number(req.query.page) || 1)));
+    const query = new URLSearchParams({ q, status, type, sort, page: String(page) });
+    if (req.user.role === 'author') query.set('ownerId', String(req.user.id));
+    const { articles: filtered, counts, total } = await request('GET', `articles?${query}`);
+    const visible = { length: counts.all };
+    const pageLink = n => '/?' + new URLSearchParams({ q, status, type, sort, page: String(n) });
     const tabs = [['all', 'All'], ['published', 'Published'], ['draft', 'Drafts']].map(([value, label]) => {
       const query = new URLSearchParams({ status: value, q, type, sort });
       return `<a class="status-tab" href="/?${e(query.toString())}" ${status === value ? 'aria-current="page"' : ''}>${label}<span>${counts[value]}</span></a>`;
@@ -191,7 +227,7 @@ app.get('/', requireLogin, async (req, res) => {
     }).join('');
     res.send(layout(type === 'album' ? 'Albums' : type === 'playlist' ? 'Playlists' : 'Articles', req.user, `<section class="stories-header"><div class="stories-intro"><p class="eyebrow">Editorial workspace</p><h1>${type === 'album' ? 'Your albums.' : type === 'playlist' ? 'Your playlists.' : 'Your stories.'}</h1><p>Write, publish, and manage the stories shaping music culture.</p></div><div class="story-metrics" aria-label="Article counts"><div class="story-metric"><span class="metric-symbol total" aria-hidden="true">▤</span><strong>${counts.all}</strong><span>Total ${type === 'album' ? 'albums' : type === 'playlist' ? 'playlists' : 'articles'}</span></div><div class="story-metric"><span class="metric-symbol published" aria-hidden="true"></span><strong>${counts.published}</strong><span>Published</span></div><div class="story-metric"><span class="metric-symbol draft" aria-hidden="true"></span><strong>${counts.draft}</strong><span>Drafts</span></div></div><a class="button new-story" href="/articles/new${type === 'album' || type === 'playlist' ? `?type=${type}` : ''}"><span aria-hidden="true">＋</span> New ${type === 'album' || type === 'playlist' ? type : 'article'}</a></section>
       <section class="story-tools" aria-label="Filter articles"><nav class="status-tabs" aria-label="Article status">${tabs}</nav><form class="story-filters" method="get" action="/"><input type="hidden" name="status" value="${e(status)}"><label class="story-search"><span class="sr-only">Search articles</span><input type="search" name="q" value="${e(q)}" placeholder="Search articles…" maxlength="200"></label><label><span class="sr-only">Article type</span><select name="type">${[['all','All types'], ...Object.entries(postTypes)].map(([value,label]) => `<option value="${value}" ${type === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label><span class="sr-only">Sort articles</span><select name="sort">${[['newest','Newest first'],['oldest','Oldest first'],['title','Title A–Z']].map(([value,label]) => `<option value="${value}" ${sort === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button class="filter-submit">Apply</button></form></section>
-      <div class="card table-card stories-table"><table><caption class="sr-only">Articles</caption><thead><tr><th>Article</th><th>Status</th><th>Type</th><th>Author</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows || `<tr><td colspan="6"><div class="story-empty"><h2>${(visible.length || q) ? 'No matching articles' : 'Your next story starts here'}</h2><p>${(visible.length || q) ? 'Try another search or change the filters.' : 'Create an article to start your first draft.'}</p><a href="${(visible.length || q) ? '/' : '/articles/new'}">${(visible.length || q) ? 'Clear filters' : 'New article'}</a></div></td></tr>`}</tbody></table></div><p class="results-summary" role="status">Showing ${filtered.length} of ${visible.length} articles</p>`, req.query.notice));
+      <div class="card table-card stories-table"><table><caption class="sr-only">Articles</caption><thead><tr><th>Article</th><th>Status</th><th>Type</th><th>Author</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${rows || `<tr><td colspan="6"><div class="story-empty"><h2>${(visible.length || q) ? 'No matching articles' : 'Your next story starts here'}</h2><p>${(visible.length || q) ? 'Try another search or change the filters.' : 'Create an article to start your first draft.'}</p><a href="${(visible.length || q) ? '/' : '/articles/new'}">${(visible.length || q) ? 'Clear filters' : 'New article'}</a></div></td></tr>`}</tbody></table></div><p class="results-summary" role="status">Showing ${filtered.length} of ${total} articles</p><nav aria-label="Article pages">${page > 1 ? `<a class="button secondary" href="${e(pageLink(page - 1))}">Previous</a>` : ''} ${page * 50 < total ? `<a class="button secondary" href="${e(pageLink(page + 1))}">Next</a>` : ''}</nav>`, req.query.notice));
   } catch (error) { res.status(502).send(layout('Articles', req.user, '<h1>Site connection failed</h1>', error.message)); }
 });
 require('./playlists')(app, requireLogin, sitePublic);
@@ -221,6 +257,7 @@ async function saveArticle(req, res, id) {
     if (id) {
       current = (await request('GET', `articles/${id}`)).article;
       if (req.user.role === 'author' && current.status === 'published') return res.status(403).send('Authors cannot edit published articles');
+      if (current.version !== Number(req.body.version)) throw Object.assign(new Error('This item has changed since you opened it. Your changes were not saved. Open the latest version in another tab to review them.'), { status: 409 });
     }
     const status = req.body.intent === 'publish' ? 'published' : (current?.status || 'draft');
     let image = String(req.body.image || '').trim();
@@ -234,18 +271,18 @@ async function saveArticle(req, res, id) {
     if (!id) db.prepare('INSERT INTO article_owners (article_id,user_id) VALUES (?,?)').run(saved.id, req.user.id);
     redirect(res, `/articles/${saved.id}?notice=Saved`);
   } catch (error) {
-    res.status(400).send(layout('Article error', req.user, articleForm({ ...req.body, id, status: current?.status, tags: String(req.body.tags || '').split(',') }, error.message, req.user.role !== 'author')));
+    res.status(error.status || 400).send(layout('Article error', req.user, articleForm({ ...req.body, id, status: current?.status, tags: String(req.body.tags || '').split(',') }, error.message, req.user.role !== 'author')));
   }
 }
-app.post('/articles', requireLogin, upload.single('imageFile'), (req, res) => saveArticle(req, res, null));
-app.post('/articles/:id', requireLogin, upload.single('imageFile'), (req, res) => saveArticle(req, res, Number(req.params.id)));
+app.post('/articles', requireLogin, imageUpload, (req, res) => saveArticle(req, res, null));
+app.post('/articles/:id', requireLogin, imageUpload, (req, res) => saveArticle(req, res, Number(req.params.id)));
 app.post('/articles/:id/unpublish', requireLogin, async (req, res) => {
   if (req.user.role === 'author') return res.status(403).send('Authors cannot unpublish');
   try {
     const id = Number(req.params.id);
     const { article } = await request('GET', `articles/${id}`);
     const { title, slug, body, excerpt, author, image, tags, postType } = article;
-    await request('PUT', `articles/${id}`, { title, slug, body, excerpt, author, image, tags, postType, status: 'draft', actor: req.user.email });
+    await request('PUT', `articles/${id}`, { title, slug, body, excerpt, author, image, tags, postType, status: 'draft', actor: req.user.email, version: Number(req.body.version) });
     redirect(res, `/articles/${id}?notice=Article+unpublished`);
   } catch (error) {
     res.status(502).send(layout('Unpublish failed', req.user, '<h1>Could not unpublish</h1><p>Your request could not be confirmed. Reopen the article to check its current status before trying again.</p><a href="/">Back to articles</a>', error.message));
@@ -258,8 +295,8 @@ function requirePublisher(req, res, next) {
   next();
 }
 function songForm(song, error = '') {
-  return `<h1>Edit song</h1>${error ? `<p class="notice">${e(error)}</p>` : ''}<p>${e(song.artistName)} · ${e(song.slug)}</p>
-    <form data-editor-form method="post" class="card" action="/songs/${Number(song.id)}">
+  return `<h1>Edit song</h1>${error ? `<p class="notice">${e(error)}</p><p><a href="/songs/${Number(song.id)}" target="_blank" rel="noopener noreferrer">Open latest version in another tab</a></p>` : ''}<p>${e(song.artistName)} · ${e(song.slug)}</p>
+    <form data-editor-form ${error ? 'data-unsaved="1"' : ''} data-editing="songs/${Number(song.id)}" method="post" class="card" action="/songs/${Number(song.id)}"><input type="hidden" name="version" value="${e(song.version)}">
     <label>Display title<input name="title" required maxlength="300" value="${e(song.title)}"></label>
     <label>Song name<input name="songName" required maxlength="300" value="${e(song.songName)}"></label>
     <p>The song URL stays the same. Saving updates the public song immediately.</p><button>Save song</button></form>`;
@@ -267,9 +304,10 @@ function songForm(song, error = '') {
 app.get('/songs', requireLogin, requirePublisher, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim().slice(0, 200);
-    const { songs } = await request('GET', `songs?q=${encodeURIComponent(q)}`);
+    const page = Math.min(100000,Math.max(1,Math.floor(Number(req.query.page)||1)));
+    const { songs, total } = await request('GET', `songs?q=${encodeURIComponent(q)}&page=${page}`);
     const rows = songs.map(song => `<tr><td><a href="/songs/${Number(song.id)}">${e(song.title)}</a></td><td>${e(song.songName)}</td><td>${e(song.artistName)}</td><td>${editLink(`/songs/${Number(song.id)}`, song.title)}</td></tr>`).join('');
-    res.send(layout('Songs', req.user, `<h1>Songs</h1><form method="get"><label>Search title or song name<input name="q" value="${e(q)}" maxlength="200"></label><button>Search</button></form><table><tr><th>Title</th><th>Song name</th><th>Artist</th><th>Actions</th></tr>${rows || '<tr><td colspan="4">No songs found.</td></tr>'}</table>`));
+    res.send(layout('Songs', req.user, `<h1>Songs</h1><form method="get"><label>Search title or song name<input name="q" value="${e(q)}" maxlength="200"></label><button>Search</button></form><table><tr><th>Title</th><th>Song name</th><th>Artist</th><th>Actions</th></tr>${rows || '<tr><td colspan="4">No songs found.</td></tr>'}</table><p>${Number(total)} songs</p><nav aria-label="Song pages">${page>1?`<a href="/songs?page=${page-1}&q=${e(encodeURIComponent(q))}">Previous</a>`:''} ${page*50<total?`<a href="/songs?page=${page+1}&q=${e(encodeURIComponent(q))}">Next</a>`:''}</nav>`));
   } catch { res.status(502).send(layout('Songs', req.user, '<h1>Song connection unavailable</h1><p>The connected site needs the CMS song API. No changes were saved.</p>')); }
 });
 app.get('/songs/:id', requireLogin, requirePublisher, async (req, res) => {
@@ -285,23 +323,25 @@ app.post('/songs/:id', requireLogin, requirePublisher, async (req, res) => {
   if (!Number.isSafeInteger(id) || id < 1) return res.status(400).send('Invalid song id');
   const title = String(req.body.title || '').trim();
   const songName = String(req.body.songName || '').trim();
-  const song = { id, title, songName };
+  const song = { id, title, songName, version: req.body.version };
   if (!title || !songName || title.length > 300 || songName.length > 300) return res.status(400).send(layout('Edit song', req.user, songForm(song, 'Title and song name must contain 1–300 characters')));
   try {
-    await request('PUT', `songs/${id}`, { title, songName, actor: req.user.email });
+    await request('PUT', `songs/${id}`, { title, songName, actor: req.user.email, version: Number(req.body.version) });
     redirect(res, `/songs/${id}?notice=Saved`);
-  } catch { res.status(502).send(layout('Edit song', req.user, songForm(song, 'Save could not be confirmed. Reopen the song to check its current name before retrying.'))); }
+  } catch (error) { res.status(error.status || 502).send(layout('Edit song', req.user, songForm(song, error.message))); }
 });
 
 function rolesFor(user) { return user.role === 'superuser' ? ['owner','editor','author'] : ['editor','author']; }
 app.get('/team', requireLogin, requireManager, (req, res) => {
-  const users = db.prepare('SELECT id,email,name,username,role,active FROM users ORDER BY id').all();
+  const page = Math.min(100000,Math.max(1,Math.floor(Number(req.query.page)||1)));
+  const total = db.prepare('SELECT COUNT(*) AS total FROM users').get().total;
+  const users = db.prepare('SELECT id,email,name,username,role,active FROM users ORDER BY id LIMIT 50 OFFSET ?').all((page-1)*50);
   const invites = db.prepare('SELECT id,email,role,expires_at,accepted_at,revoked_at FROM invites ORDER BY id DESC LIMIT 30').all();
   const options = rolesFor(req.user).map(role => `<option value="${role}">${role}</option>`).join('');
   const userRows = users.map(user => `<tr><td>${e(user.name)}</td><td>${e(user.username)}</td><td>${e(user.email)}</td><td>${e(user.role)}</td><td>${user.active ? 'Active' : 'Disabled'}</td><td>${user.id === req.user.id || user.role === 'superuser' || (user.role === 'owner' && req.user.role !== 'superuser') ? '' : `<form method="post" action="/team/users/${user.id}"><select name="role"><option value="${e(user.role)}">${e(user.role)}</option>${options}</select><select name="active"><option value="1" ${user.active ? 'selected' : ''}>Active</option><option value="0" ${!user.active ? 'selected' : ''}>Disabled</option></select><button>Update</button></form>`}</td></tr>`).join('');
   const inviteRows = invites.map(i => `<tr><td>${e(i.email)}</td><td>${e(i.role)}</td><td>${i.accepted_at ? 'Accepted' : i.revoked_at ? 'Revoked' : i.expires_at < Date.now() ? 'Expired' : 'Pending'}</td><td>${!i.accepted_at && !i.revoked_at ? `<form method="post" action="/team/invites/${i.id}/revoke"><button class="secondary">Revoke</button></form>` : ''}</td></tr>`).join('');
   res.send(layout('Team', req.user, `<h1>Team</h1><div class="card"><h2>Invite a person</h2><form method="post" action="/team/invites"><div class="row"><label>Email<input type="email" name="email" required></label><label>Role<select name="role">${options}</select></label></div><button>Send invitation</button></form></div>
-  <h2>Users</h2><div class="card"><table><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Control</th></tr>${userRows}</table></div><h2>Invitations</h2><div class="card"><table><tr><th>Email</th><th>Role</th><th>Status</th><th>Control</th></tr>${inviteRows}</table></div>`, req.query.notice));
+  <h2>Users</h2><div class="card"><table><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Control</th></tr>${userRows}</table></div><p>${total} staff</p><nav aria-label="Staff pages">${page>1?`<a href="/team?page=${page-1}">Previous</a>`:''} ${page*50<total?`<a href="/team?page=${page+1}">Next</a>`:''}</nav><h2>Invitations</h2><div class="card"><table><tr><th>Email</th><th>Role</th><th>Status</th><th>Control</th></tr>${inviteRows}</table></div>`, req.query.notice));
 });
 app.post('/team/invites', requireLogin, requireManager, async (req, res) => {
   const email = String(req.body.email || '').toLowerCase().trim();
@@ -340,29 +380,33 @@ app.get('/invite/:token', (req, res) => {
   if (!invite) return res.status(410).send('Invitation expired or unavailable');
   res.send(layout('Accept invitation', null, `<h1>Join LyricalSource CMS</h1><p>${e(invite.email)} · ${e(invite.role)}</p>${siteAuth ? '<p>Sign in with this email and your LyricalSource site password after accepting.</p>' : ''}<form method="post" class="card short"><label>Name<input name="name" required></label>${usernameField('')}${siteAuth ? '' : '<label>Password<input type="password" name="password" required></label>'}<button>Create account</button></form>`, req.query.error));
 });
-app.post('/invite/:token', (req, res) => {
+app.post('/invite/:token', async (req, res) => {
   const invite = db.prepare('SELECT * FROM invites WHERE token_hash=? AND expires_at>? AND accepted_at IS NULL AND revoked_at IS NULL').get(digest(req.params.token), Date.now());
   if (!invite) return res.status(410).send('Invitation expired or unavailable');
   const name = String(req.body.name || '').trim().slice(0, 100);
   const username = String(req.body.username || '').trim().toLowerCase();
   if (username && (!/^[a-z0-9_]{3,30}$/.test(username) || db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(username))) return redirect(res, `/invite/${req.params.token}?error=Username+invalid+or+already+taken`);
   const password = siteAuth ? randomToken() : String(req.body.password || '');
+  if (password.length > 4096) return res.status(400).send('Password input is too long');
   if (!name || !password.length) return redirect(res, `/invite/${req.params.token}?error=Name+and+password+required`);
   try {
+    const passwordHash = await hashPasswordAsync(password);
     db.transaction(() => {
-      const created = db.prepare('INSERT INTO users (email,name,password_hash,role,username) VALUES (?,?,?,?,?)').run(invite.email, name, hashPassword(password), invite.role, username || null);
+      const accepted = db.prepare('UPDATE invites SET accepted_at=? WHERE id=? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>?').run(Date.now(), invite.id, Date.now());
+      if (!accepted.changes) throw new Error('Invitation unavailable');
+      const created = db.prepare('INSERT INTO users (email,name,password_hash,role,username) VALUES (?,?,?,?,?)').run(invite.email, name, passwordHash, invite.role, username || null);
       if (!username) {
         let automatic = `staff${created.lastInsertRowid}`;
         while (db.prepare('SELECT 1 FROM users WHERE username=? COLLATE NOCASE').get(automatic)) automatic += '_';
         db.prepare('UPDATE users SET username=? WHERE id=?').run(automatic, created.lastInsertRowid);
       }
-      db.prepare('UPDATE invites SET accepted_at=? WHERE id=?').run(Date.now(), invite.id);
     })();
     redirect(res, '/login?error=Account+created.+Log+in');
   } catch { res.status(409).send('Account already exists'); }
 });
 app.use((error, req, res, next) => {
-  if (error instanceof multer.MulterError) return res.status(400).send('Image must be under 5 MB');
+  if (error.status === 503) return res.status(503).send(layout('Workspace busy', req.user, '<h1>Workspace busy</h1><p>Keep your editing tab open and try again shortly.</p>'));
+  if (error instanceof multer.MulterError) return res.status(400).send('Upload or form is too large. Images must be under 5 MB.');
   next(error);
 });
 module.exports = app;

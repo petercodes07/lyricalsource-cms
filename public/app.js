@@ -26,7 +26,7 @@
   updateConnection();
   const form = document.querySelector('[data-editor-form]');
   if (!form) return;
-  let dirty = false;
+  let dirty = form.dataset.unsaved === '1';
   const status = document.querySelector('[data-save-status]');
   const editor = document.getElementById('editor');
   const markDirty = () => { dirty = true; if (status) status.textContent = 'Unsaved changes'; };
@@ -62,5 +62,39 @@
       menu.open = false;
       menu.querySelector('summary').focus();
     }
+  });
+})();
+
+(() => {
+  const form = document.querySelector('[data-editing]');
+  if (!form) return;
+  const script = document.querySelector('script[src$="/app.js"]');
+  const endpoint = new URL('editing/' + form.dataset.editing, script.src);
+  const notice = document.createElement('p');
+  notice.className = 'notice';
+  notice.setAttribute('role', 'status');
+  notice.hidden = true;
+  form.before(notice);
+  let pending = false;
+  async function heartbeat() {
+    if (document.hidden || pending || !navigator.onLine) return;
+    pending = true;
+    try {
+      const response = await fetch(endpoint, { method: 'POST', signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error();
+      const { editors } = await response.json();
+      notice.textContent = editors.length ? `${editors.join(', ')} ${editors.length === 1 ? 'is' : 'are'} also editing this item. Only the first save of this version will be accepted.` : '';
+      notice.hidden = !editors.length;
+    } catch {
+      notice.textContent = 'Live editor presence is unavailable. Save conflict checks still apply.';
+      notice.hidden = false;
+    } finally { pending = false; }
+  }
+  heartbeat();
+  const timer = setInterval(heartbeat, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) heartbeat(); });
+  window.addEventListener('pagehide', () => {
+    clearInterval(timer);
+    navigator.sendBeacon(endpoint, new URLSearchParams({ leave: '1' }));
   });
 })();

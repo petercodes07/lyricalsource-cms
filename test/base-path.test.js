@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 test('CMS behind /cms keeps forms, redirects, assets and manifest in scope', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cms-prefix-test-'));
-  const site = http.createServer((req, res) => { res.setHeader('content-type','application/json'); res.end(JSON.stringify({ articles: [] })); });
+  const site = http.createServer((req, res) => { res.setHeader('content-type','application/json'); res.end(JSON.stringify({ articles: [], counts: { all:0,published:0,draft:0 }, total:0 })); });
   await new Promise(resolve => site.listen(0,'127.0.0.1',resolve));
   Object.assign(process.env, { CMS_DB_PATH: path.join(temp,'cms.sqlite'), CMS_BASE_URL: 'https://lyricalsource.com/cms', SITE_API_URL: `http://127.0.0.1:${site.address().port}`, CMS_API_TOKEN: 'isolated-test-token', CMS_SUPERUSER_EMAIL: 'prefix-test@example.com', CMS_SUPERUSER_PASSWORD: 'isolated-test-password' });
   delete process.env.CMS_AUTH_PROVIDER;

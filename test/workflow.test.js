@@ -8,8 +8,8 @@ const path = require('node:path');
 test('staff can invite, draft and publish with role checks', async () => {
   const articles = new Map();
   const playlists = new Map();
-  const album = { id: 5, slug: 'existing-album', title: 'Existing album', artistName: 'Artist', artistSlug: 'artist', image: 'https://example.com/album.jpg', releaseDate: '2026-01-01', description: 'Description', trackCount: 1, tracks: [{ id: 7, trackNumber: 1, songName: 'Track', artistName: 'Artist' }], qa: [] };
-  const song = { id: 7, slug: 'existing-song', title: 'Original title', songName: 'Original name', artistName: 'Artist' };
+  const album = { version:1, id: 5, slug: 'existing-album', title: 'Existing album', artistName: 'Artist', artistSlug: 'artist', image: 'https://example.com/album.jpg', releaseDate: '2026-01-01', description: 'Description', trackCount: 1, tracks: [{ id: 7, trackNumber: 1, songName: 'Track', artistName: 'Artist' }], qa: [] };
+  const song = { version:1, id: 7, slug: 'existing-song', title: 'Original title', songName: 'Original name', artistName: 'Artist' };
   let nextId = 1;
   const site = http.createServer(async (req, res) => {
     const chunks = [];
@@ -17,31 +17,47 @@ test('staff can invite, draft and publish with role checks', async () => {
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
     res.setHeader('content-type', 'application/json');
     if (req.headers.authorization !== 'Bearer test-service-token') { res.statusCode = 401; return res.end('{}'); }
+    function conflict(current) {
+      if (body.version !== current.version) { res.statusCode=409; res.end(JSON.stringify({error:'This item has changed since you opened it. Your changes were not saved.'})); return true; }
+      return false;
+    }
     if (req.url.startsWith('/api/cms/albums')) {
-      if (req.method === 'PUT') { Object.assign(album, body); return res.end(JSON.stringify({ id: album.id })); }
+      if (req.method === 'PUT') { if(conflict(album))return; Object.assign(album, body, {version:album.version+1}); return res.end(JSON.stringify({ id: album.id })); }
       return res.end(JSON.stringify(req.url.includes('id=') ? { album } : { albums: [album], total: 1 }));
     }
     if (req.url.startsWith('/api/cms/playlists')) {
       const slug = new URL(req.url, 'http://localhost').searchParams.get('slug');
       if (req.method === 'GET') return res.end(JSON.stringify(slug ? { playlist: playlists.get(slug) } : { playlists: [...playlists.values()] }));
-      const playlist = { ...body, songCount: body.songs.length, songs: body.songs.map(id => ({ ...song, id })) };
+      const prior=playlists.get(body.slug);
+      if(req.method==='PUT' && conflict(prior))return;
+      const playlist = { ...body, version:(prior?.version||0)+1, songCount: body.songs.length, songs: body.songs.map(id => ({ ...song, id })) };
       playlists.set(body.slug, playlist);
       return res.end(JSON.stringify({ slug: body.slug }));
     }
     if (req.url.startsWith('/api/cms/songs')) {
       if (req.method === 'GET' && req.url.includes('?')) return res.end(JSON.stringify({ songs: [song] }));
       if (req.method === 'GET') return res.end(JSON.stringify({ song }));
-      if (req.method === 'PUT') { Object.assign(song, { title: body.title, songName: body.songName }); return res.end(JSON.stringify({ id: song.id })); }
+      if (req.method === 'PUT') { if(conflict(song))return; Object.assign(song, { version:song.version+1, title: body.title, songName: body.songName }); return res.end(JSON.stringify({ id: song.id })); }
     }
     const id = Number(req.url.split('/').at(-1));
-    if (req.method === 'GET' && req.url === '/api/cms/articles') return res.end(JSON.stringify({ articles: [...articles.values()] }));
+    if (req.method === 'GET' && req.url.startsWith('/api/cms/articles?')) {
+      const params = new URL(req.url,'http://localhost').searchParams;
+      let visible = [...articles.values()];
+      if(params.has('ownerId')) visible=visible.filter(a=>a.ownerId===Number(params.get('ownerId'))&&a.status==='draft');
+      if(['news','blog','album','playlist'].includes(params.get('type'))) visible=visible.filter(a=>a.postType===params.get('type'));
+      const counts={all:visible.length,published:visible.filter(a=>a.status==='published').length,draft:visible.filter(a=>a.status==='draft').length};
+      const filtered=visible.filter(a=>(params.get('status')==='all'||a.status===params.get('status'))&&(!params.get('q')||[a.title,a.slug,a.author,...(a.tags||[])].join(' ').toLowerCase().includes(params.get('q').toLowerCase())));
+      const offset=(Number(params.get('page'))-1)*50;
+      return res.end(JSON.stringify({articles:filtered.slice(offset,offset+50),counts,total:filtered.length}));
+    }
     if (req.method === 'POST' && req.url === '/api/cms/articles') {
-      const article = { ...body, id: nextId++ }; articles.set(article.id, article);
+      const article = { ...body, version:1, id: nextId++ }; articles.set(article.id, article);
       res.statusCode = 201; return res.end(JSON.stringify({ id: article.id, slug: article.slug }));
     }
     if (req.method === 'GET' && articles.has(id)) return res.end(JSON.stringify({ article: articles.get(id) }));
     if (req.method === 'PUT' && articles.has(id)) {
-      const article = { ...body, id }; articles.set(id, article); return res.end(JSON.stringify({ id, slug: article.slug }));
+      if(conflict(articles.get(id)))return;
+      const article = { ...articles.get(id), ...body, version:articles.get(id).version+1, id }; articles.set(id, article); return res.end(JSON.stringify({ id, slug: article.slug }));
     }
     res.statusCode = 404; res.end(JSON.stringify({ error: 'Not found' }));
   });
@@ -59,6 +75,12 @@ test('staff can invite, draft and publish with role checks', async () => {
   const base = `http://127.0.0.1:${cms.address().port}`;
   process.env.CMS_BASE_URL = base;
   async function post(route, values, cookie = '') {
+    values = {...values};
+    if(!Object.hasOwn(values,'version')) {
+      const match=/^\/articles\/(\d+)/.exec(route);
+      const current=match?articles.get(Number(match[1])):route==='/songs/7'?song:route==='/albums/5'?album:route.startsWith('/playlists/')?playlists.get(route.split('/').at(-1)):null;
+      if(current) values.version=String(current.version);
+    }
     return fetch(base + route, { method: 'POST', redirect: 'manual', headers: { origin: base, cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(values) });
   }
   try {
@@ -124,7 +146,7 @@ test('staff can invite, draft and publish with role checks', async () => {
     assert.match(listPage, /Showing 1 of 1 articles/);
     assert.match(listPage, /aria-label="Edit Test Story"/);
     const hiddenDrafts = await (await fetch(base + '/?status=published', { headers: { cookie: writerCookie } })).text();
-    assert.match(hiddenDrafts, /Showing 0 of 1 articles/);
+    assert.match(hiddenDrafts, /Showing 0 of 0 articles/);
     assert.doesNotMatch(hiddenDrafts, /class="story-title"/);
     const searched = await (await fetch(base + '/?q=test&type=blog&status=draft', { headers: { cookie: writerCookie } })).text();
     assert.match(searched, /Showing 1 of 1 articles/);
@@ -155,6 +177,21 @@ test('staff can invite, draft and publish with role checks', async () => {
       assert.equal(articles.get(1).status, 'published');
       assert.equal(articles.get(1).title, 'Updated story');
     }
+    const version=articles.get(1).version;
+    const simultaneous=await Promise.all([
+      post('/articles/1',{...edit,title:'First collaboration save',version},ownerCookie),
+      post('/articles/1',{...edit,title:'Second collaboration save',version},ownerCookie)
+    ]);
+    assert.deepEqual(simultaneous.map(r=>r.status).sort(),[302,409]);
+    const rejected=simultaneous.find(r=>r.status===409);
+    assert.match(await rejected.text(),/data-unsaved="1"/);
+    assert.equal(articles.get(1).version,version+1);
+    assert.equal((await fetch(base+'/editing/articles/1',{method:'POST',headers:{cookie:writerCookie}})).status,200);
+    assert.deepEqual((await (await post('/editing/articles/1',{},ownerCookie)).json()).editors,['Writer']);
+    assert.equal((await post('/editing/songs/7',{},writerCookie)).status,403);
+    assert.equal((await post('/editing/articles/9999',{},writerCookie)).status,403);
+    assert.equal((await post('/editing/articles/1',{leave:'1'},writerCookie)).status,204);
+    assert.deepEqual((await (await post('/editing/articles/1',{},ownerCookie)).json()).editors,[]);
     const editPage = await (await fetch(base + '/articles/1', { headers: { cookie: ownerCookie } })).text();
     assert.match(editPage, /Save changes/);
     assert.match(editPage, /Unpublish article/);
